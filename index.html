@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cerebral Race – Bangun Ruang</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><div class="logo">🏆</div>
+      <div><h1>CEREBRAL RACE</h1><small>BANGUN RUANG • MATH CHAMPS</small></div>
+    </div>
+    <div><a class="btn ghost" href="/admin">🛡️ Admin</a></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="pill lobby">⚔️ ARENA PEREBUTAN SOAL</span>
+      <h2>10 Flip Chart • 50 Soal • 40 Menit</h2>
+      <p style="color:var(--mut);line-height:1.7">Peserta (<b>Champions</b>) berebut menyelesaikan &amp; mengklaim soal Bangun Ruang secepat-cepatnya. Setiap flip chart hanya menampilkan <b>satu soal terdepan</b> — soal belakang terkunci sampai soal depan diklaim. Jawaban benar pertama mengunci soal secara permanen (server-side, anti-serobot). Waktu habis atau semua soal diklaim → permainan berakhir otomatis.</p>
+      <div class="hr"></div>
+      <h3>🎯 Aturan main</h3>
+      <ul style="color:var(--mut);line-height:1.8">
+        <li>Masukkan <b>kode game</b> dari guru + nama Champion (unik).</li>
+        <li>Pilih soal <b>terdepan (bercahaya)</b> di salah satu flip chart.</li>
+        <li>Jawab lewat <b>Adapto X</b>. Salah → soal tetap tersedia, boleh coba lagi.</li>
+        <li>Benar → soal <b>terklaim atas namamu</b> di semua perangkat, real-time.</li>
+        <li>Refresh / internet putus? Sesi tersimpan — masuk kembali otomatis.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>🚀 Masuk Arena</h2>
+      <label>Kode Game (dari guru)</label>
+      <input id="code" placeholder="cth: KX7P2Q" maxlength="6" style="text-transform:uppercase">
+      <label>Nama Champion</label>
+      <input id="name" placeholder="cth: Nasywaa" maxlength="24">
+      <div style="height:12px"></div>
+      <button class="btn gold" id="join" style="width:100%">Masuk Ruang Permainan ➜</button>
+      <div class="hr"></div>
+      <button class="btn ghost" id="rejoin" style="width:100%">🔄 Kembali ke sesi sebelumnya</button>
+      <p class="kbd" id="msg"></p>
+      <div class="hr"></div>
+      <h3 style="margin:0 0 8px">🎮 Game tersedia</h3>
+      <div id="games" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+  </div>
+  <div class="footer">Cerebral Race • Bangun Ruang • Real-time (WebSocket) + SQLite • Kunci jawaban hanya di server</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+async function listGames(){
+  try{
+    const r=await fetch('/api/games'); const j=await r.json();
+    $('games').innerHTML = j.games.length? j.games.map(g=>
+      `<button class="btn ghost" data-c="${g.id}" style="text-align:left">🔖 <b>${g.id}</b> — ${g.name}<br><span class="kbd">${g.status} • ${g.players} champion • ${g.claimed}/50 diklaim</span></button>`).join('')
+      : '<span class="kbd">Belum ada game. Minta guru membuat game di Admin.</span>';
+    document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{ $('code').value=b.dataset.c; });
+  }catch(e){}
+}
+listGames();
+$('join').onclick=async()=>{
+  const code=$('code').value.trim().toUpperCase(), name=$('name').value.trim();
+  if(!code||!name){$('msg').textContent='Isi kode game dan nama dulu.';return;}
+  const r=await fetch('/api/game/'+code+'/join',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  const j=await r.json();
+  if(!r.ok){$('msg').textContent=j.error||'Gagal masuk.';return;}
+  localStorage.setItem('cr_game',code);
+  localStorage.setItem('cr_token',j.token);
+  location.href='/play?game='+code;
+};
+$('rejoin').onclick=()=>{
+  const g=localStorage.getItem('cr_game');
+  if(!g){$('msg').textContent='Belum ada sesi tersimpan di perangkat ini.';return;}
+  location.href='/play?game='+g;
+};
+</script>
+</body>
+</html>

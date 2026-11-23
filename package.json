@@ -1,0 +1,14 @@
+{
+  "name": "cerebral-race-bangun-ruang",
+  "version": "1.0.0",
+  "description": "Game Kompetitif Matematika Bangun Ruang – Cerebral Race (real-time, SQLite + WebSocket)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "ws": "^8.23.0"
+  }
+}
