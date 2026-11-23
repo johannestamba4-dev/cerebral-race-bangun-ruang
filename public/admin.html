@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Dashboard – Cerebral Race</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><div class="logo">🛡️</div>
+      <div><h1>ADMIN DASHBOARD</h1><small>CEREBRAL RACE • GURU</small></div>
+    </div>
+    <div><a class="btn ghost" href="/">⬅ Beranda</a></div>
+  </div>
+
+  <div class="card" id="loginCard">
+    <h2>🔐 Login Administrator</h2>
+    <p class="kbd">Password default: <b>guru123</b> (ubah via environment <b>ADMIN_PASSWORD</b>).</p>
+    <div style="display:flex;gap:8px"><input id="pw" type="password" placeholder="Password admin"><button class="btn gold" id="loginBtn">Masuk</button></div>
+    <p class="kbd" id="lmsg"></p>
+  </div>
+
+  <div id="dash" style="display:none">
+    <div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+      <div style="flex:1;min-width:200px"><label>Nama permainan baru</label><input id="gname" value="Cerebral Race – Bangun Ruang"></div>
+      <button class="btn gold" id="create">＋ Buat Game</button>
+      <div style="flex-basis:100%"></div>
+      <div style="flex:1;min-width:200px"><label>Pilih game yang dikelola</label><select id="gsel"></select></div>
+      <button class="btn" id="refresh">🔄 Muat ulang</button>
+      <a class="btn" id="explink" href="#">⬇ Export CSV</a>
+    </div>
+
+    <div class="grid2" style="margin-top:16px">
+      <div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+            <div><span class="pill lobby" id="st">–</span> <b id="gtitle">–</b> <span class="kbd" id="gcode"></span></div>
+            <div class="timer" id="timer">–</div>
+          </div>
+          <div class="kbd" id="counts"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn gold" id="start">▶ Mulai (40:00)</button>
+            <button class="btn danger" id="end">⏹ Akhiri manual</button>
+            <button class="btn danger" id="reset">♻ Reset (konfirmasi)</button>
+            <button class="btn danger" id="delgame">🗑 Hapus game</button>
+          </div>
+          <div class="hr"></div>
+          <h3>📋 Soal per Flip Chart (klik untuk kunci & status)</h3>
+          <div id="qgrid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px"></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3>🧾 Riwayat pengiriman jawaban (terbaru)</h3>
+          <div style="max-height:300px;overflow:auto"><table><thead><tr><th>Waktu</th><th>Champion</th><th>Soal</th><th>Jawaban</th><th>Hasil</th></tr></thead><tbody id="log"></tbody></table></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3 style="margin-top:0">🏁 Leaderboard</h3>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3 style="margin-top:0">👥 Champions (<span id="pcount">0</span>)</h3>
+          <div style="max-height:420px;overflow:auto"><table><thead><tr><th>Nama</th><th>Skor</th><th>Klaim</th><th></th></tr></thead><tbody id="plist"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">Reset butuh konfirmasi & hanya oleh admin terautentikasi • Refresh tidak me-reset permainan</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+let TOK=sessionStorage.getItem('cr_admin')||'';
+let GID='';
+function toast(m,ok){const t=$('toast');t.textContent=m;t.className='toast '+(ok===false?'bad':'ok');clearTimeout(t._x);t._x=setTimeout(()=>t.className='toast',3500);}
+function auth(){return {Authorization:'Bearer '+TOK};}
+async function api(u,o={}){o.headers={...(o.headers||{}),...auth(),'Content-Type':'application/json'};const r=await fetch(u,o);let j={};try{j=await r.json();}catch(e){}return{r,j};}
+function fmt(s){if(s==null)return '–';s=Math.max(0,s|0);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+async function tryLogin(){
+  if(!TOK)return false;
+  const {r}=await api('/api/admin/game/X');
+  return r.status!==401; // token valid (404 = valid tapi game tak ada)
+}
+async function doLogin(){
+  const pw=$('pw').value;
+  const r=await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+  const j=await r.json();
+  if(!r.ok){$('lmsg').textContent=j.error||'Gagal';return;}
+  TOK=j.token;sessionStorage.setItem('cr_admin',TOK);
+  enter();
+}
+async function enter(){
+  $('loginCard').style.display='none';$('dash').style.display='block';
+  await loadGames();
+}
+async function loadGames(){
+  const {r,j}=await api('/api/games');
+  if(r.status===401){sessionStorage.removeItem('cr_admin');TOK='';$('loginCard').style.display='block';$('dash').style.display='none';return;}
+  const sel=$('gsel');const cur=GID;
+  sel.innerHTML=j.games.map(g=>`<option value="${g.id}">${g.id} — ${g.name} [${g.status}] (${g.players}👥 ${g.claimed}/50)</option>`).join('')||'<option value="">(belum ada game)</option>';
+  const qp=new URLSearchParams(location.search).get('game');
+  GID=cur||qp||(j.games[0]?.id)||'';
+  if(GID)sel.value=GID;
+  if(GID)loadState();
+}
+async function loadState(){
+  if(!GID)return;
+  const {r,j}=await api('/api/admin/game/'+GID);
+  if(!r.ok){toast(j.error||'Gagal memuat',false);return;}
+  $('gtitle').textContent=j.game.name;$('gcode').textContent='kode: '+j.game.id;
+  const st=$('st');st.textContent=j.game.status.toUpperCase();st.className='pill '+(j.game.status==='running'?'live':j.game.status==='lobby'?'lobby':'end');
+  $('timer').textContent=j.game.status==='running'?fmt(j.game.remaining):j.game.status==='lobby'?'40:00':'00:00';
+  $('counts').textContent=`${j.claimed}/${j.game.total} soal diklaim • ${j.playerCount} champion • tersedia ${j.game.total-j.claimed}`;
+  $('explink').href='/api/admin/game/'+GID+'/export.csv';
+  // cara paksa auth untuk link biasa: buka via fetch
+  $('board').innerHTML=j.leaderboard.map((p,i)=>`<div class="row r${i+1}"><div class="rank">${i+1}</div><div class="nm">${p.name}<br><span class="kbd">${p.claims.join(' • ')||'–'}</span></div><div class="sc">${p.score}</div></div>`).join('');
+  $('pcount').textContent=j.playerCount;
+  $('plist').innerHTML=j.players.map(p=>`<tr><td><b>${p.name}</b></td><td>${p.score}</td><td class="kbd">${p.claims.join(' ')||'–'}</td><td><button class="btn danger" data-p="${p.id}" style="padding:4px 8px">✕</button></td></tr>`).join('');
+  document.querySelectorAll('[data-p]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Keluarkan '+b.closest('tr').firstChild.textContent+'? (klaim soalnya tetap tercatat)'))return;
+    await api('/api/admin/game/'+GID+'/player/'+b.dataset.p,{method:'DELETE'});loadState();
+  });
+  $('qgrid').innerHTML=j.questions.map(q=>`<div title="${q.code}: ${q.status}${q.claimedBy?' oleh '+q.claimedBy:''}" style="padding:8px;border-radius:10px;font-size:12px;font-weight:800;text-align:center;border:1px solid ${q.status==='claimed'?'#22e07a':'#35e0ff'};background:${q.status==='claimed'?'#0b3d28':'#0b1330'}">${q.code}<br><span style="font-weight:400;font-size:10px">${q.status==='claimed'?'✅ '+(q.claimedBy||''):j.front.includes(q.code||q.id)?'🔓 depan':'🔒 belakang'}</span></div>`).join('');
+  $('log').innerHTML=(j.attempts||[]).map(a=>`<tr><td class="kbd">${new Date(a.created_at).toLocaleTimeString('id-ID')}</td><td>${a.player_name}</td><td><b>${a.question_id}</b></td><td>${String(a.answer_raw).slice(0,30)}</td><td>${a.correct?'✅ benar':'❌ salah'}</td></tr>`).join('')||'<tr><td colspan=5 class="kbd">Belum ada percobaan.</td></tr>';
+}
+$('loginBtn').onclick=doLogin;
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+$('create').onclick=async()=>{
+  const {r,j}=await api('/api/admin/games',{method:'POST',body:JSON.stringify({name:$('gname').value})});
+  if(!r.ok){toast(j.error||'Gagal',false);return;}
+  toast('Game '+j.gameId+' dibuat! Bagikan kode ke siswa.',true);GID=j.gameId;loadGames();
+};
+$('gsel').onchange=e=>{GID=e.target.value;history.replaceState(null,'','/admin?game='+GID);loadState();};
+$('refresh').onclick=loadGames;
+$('start').onclick=async()=>{const{r,j}=await api('/api/admin/game/'+GID+'/start',{method:'POST'});if(!r.ok)toast(j.error,false);else toast('Permainan dimulai! ⏱ 40 menit.',true);loadState();};
+$('end').onclick=async()=>{if(!confirm('Akhiri permainan sekarang? Peserta tak bisa menjawab lagi.'))return;await api('/api/admin/game/'+GID+'/end',{method:'POST'});loadState();};
+$('reset').onclick=async()=>{
+  const c1=confirm('RESET permainan? Semua klaim & skor dihapus, status kembali ke LOBBY. Lanjutkan?');
+  if(!c1)return;
+  const c2=prompt('Ketik RESET untuk konfirmasi:');
+  if(c2!=='RESET'){toast('Reset dibatalkan.',false);return;}
+  const{r,j}=await api('/api/admin/game/'+GID+'/reset',{method:'POST',body:JSON.stringify({confirm:true})});
+  if(!r.ok)toast(j.error,false);else toast('Game di-reset ke lobby.',true);loadState();
+};
+$('delgame').onclick=async()=>{
+  if(!confirm('Hapus permanen game '+GID+' beserta seluruh datanya?'))return;
+  await api('/api/admin/game/'+GID,{method:'DELETE'});GID='';loadGames();
+};
+$('explink').onclick=async(e)=>{
+  e.preventDefault();
+  const r=await fetch('/api/admin/game/'+GID+'/export.csv',{headers:auth()});
+  if(!r.ok){toast('Gagal export',false);return;}
+  const blob=await r.blob();const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='hasil-'+GID+'.csv';a.click();
+};
+(async()=>{ if(TOK && await tryLogin()) enter(); })();
+setInterval(()=>{if(GID&&$('dash').style.display!=='none')loadState();},4000);
+</script>
+</body>
+</html>

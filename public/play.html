@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arena – Cerebral Race</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><div class="logo">⚔️</div>
+      <div><h1 id="gname">ARENA</h1><small id="gsub">CEREBRAL RACE • BANGUN RUANG</small></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="pill lobby" id="status">…</span>
+      <div class="timer" id="timer">40:00</div>
+      <button class="btn ghost" onclick="location.href='/'">Keluar</button>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div>👤 <b id="me">–</b></div>
+        <div class="pill live">🎯 Klaim saya: <b id="myscore">0</b></div>
+        <div class="pill">📦 Diklaim: <b id="claimed">0</b>/50</div>
+        <div class="kbd" id="hint">Pilih soal bercahaya (terdepan) untuk mengerjakan.</div>
+      </div>
+      <div class="charts" id="charts"></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">🏁 Leaderboard <span class="kbd">live</span></h2>
+      <div class="board" id="board"></div>
+      <div class="hr"></div>
+      <div class="kbd">Sinkron real-time. Jangan reload berlebihan — status tersimpan di server.</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal"><div class="card sheet">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <span class="pill live" id="mcode">1A</span>
+    <button class="btn ghost" id="close">✕</button>
+  </div>
+  <div class="ilus" id="ilus"></div>
+  <div class="qtext" id="mtext"></div>
+  <div class="qmeta" id="mnote"></div>
+  <h3 style="margin:12px 0 4px">🔷 ADAPTO <span style="color:var(--cyan)">X</span> — Kolom Jawaban</h3>
+  <div class="kbd">Tulis angka saja (satuan boleh). Contoh: <b>2156</b> untuk 2.156 cm³. Koma = desimal (cth 169,56 → tulis 169,56).</div>
+  <input id="ans" inputmode="decimal" placeholder="Ketik jawaban di sini…" style="margin-top:8px;font-size:18px;font-weight:800">
+  <div class="keypad" id="pad"></div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="btn gold" id="send" style="flex:1">Kirim Jawaban ⚡</button>
+    <button class="btn ghost" id="clear">⌫</button>
+  </div>
+  <p class="kbd" id="mmsg"></p>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const qs=new URLSearchParams(location.search);
+const GAME=(qs.get('game')||localStorage.getItem('cr_game')||'').toUpperCase();
+let TOKEN=localStorage.getItem('cr_token')||'';
+let STATE=null, ME=null, CUR=null;
+const $=id=>document.getElementById(id);
+if(!GAME){location.href='/';}
+function toast(msg,ok){const t=$('toast');t.textContent=msg;t.className='toast '+(ok?'ok':'bad');clearTimeout(t._x);t._x=setTimeout(()=>t.className='toast',3500);}
+function fmt(s){s=Math.max(0,s|0);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
+function svgFor(kind,dims){
+  const c='#7df3ff',g='#f5c542';
+  const base=(inner)=>`<svg width="120" height="90" viewBox="0 0 120 90"><g fill="none" stroke="${c}" stroke-width="2">${inner}</g><text x="60" y="84" text-anchor="middle" fill="${g}" font-size="10" font-weight="bold">${dims||''}</text></svg>`;
+  if(kind==='kubus')return base('<rect x="35" y="25" width="40" height="40"/><path d="M35 25 L48 12 L88 12 L88 52 L75 65"/><path d="M48 12 L48 25 M88 12 L75 25 M88 52 L75 65 M75 25 L75 65"/>');
+  if(kind==='tabung')return base('<ellipse cx="60" cy="22" rx="26" ry="9"/><path d="M34 22 L34 62 A26 9 0 0 0 86 62 L86 22"/>');
+  if(kind==='kerucut')return base('<ellipse cx="60" cy="62" rx="26" ry="8"/><path d="M34 62 L60 18 L86 62"/>');
+  if(kind==='bola')return base('<circle cx="60" cy="45" r="26"/><ellipse cx="60" cy="45" rx="12" ry="26"/>');
+  if(kind==='limas')return base('<rect x="34" y="55" width="52" height="12"/><path d="M34 55 L60 18 L86 55 M60 18 L60 55"/>');
+  if(kind==='prisma')return base('<path d="M30 60 L50 30 L70 60 Z"/><path d="M70 60 L90 30 L90 60 L70 60 M50 30 L90 30"/>');
+  return base('<rect x="25" y="30" width="40" height="32"/><circle cx="82" cy="46" r="16"/>');
+}
+async function boot(){
+  if(!TOKEN){ // coba rejoin tanpa token -> kembali ke index
+    location.href='/';return;
+  }
+  // validasi sesi
+  let r=await fetch('/api/game/'+GAME+'/rejoin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN})});
+  if(!r.ok){ // sesi tidak cocok untuk game ini
+    localStorage.removeItem('cr_token');
+    location.href='/';return;
+  }
+  const j=await r.json(); ME=j;
+  $('me').textContent=j.name;
+  connectWS(); refresh();
+}
+async function refresh(){
+  const r=await fetch('/api/game/'+GAME+'/state'); const st=await r.json();
+  if(r.ok){STATE=st;render();}
+}
+function render(){
+  const g=STATE.game;
+  $('gname').textContent=g.name;
+  const st=$('status');
+  st.textContent = g.status==='lobby'?'🕓 LOBBY — menunggu guru menekan Mulai':g.status==='running'?'🔴 LIVE — berebut sekarang!':'🏁 SELESAI';
+  st.className='pill '+(g.status==='running'?'live':g.status==='lobby'?'lobby':'end');
+  $('timer').textContent = g.status==='running'?fmt(g.remaining):g.status==='lobby'?'40:00':'00:00';
+  $('claimed').textContent=g.claimed;
+  const meRow=STATE.leaderboard.find(p=>p.name===ME.name);
+  $('myscore').textContent=meRow?meRow.score:0;
+  // charts 1..10
+  const box=$('charts'); box.innerHTML='';
+  for(let c=1;c<=10;c++){
+    const qs=STATE.questions.filter(q=>q.chart===c);
+    const div=document.createElement('div');div.className='chart';
+    const done=qs.filter(q=>q.status==='claimed').length;
+    div.innerHTML=`<header><span>📋 FLIP ${c}</span><span>${done}/5</span></header>`;
+    const sl=document.createElement('div');sl.className='slots';
+    qs.forEach(q=>{
+      const isFront=STATE.front.includes(q.id);
+      const d=document.createElement('div');
+      d.className='slot '+(q.status==='claimed'?'claimed':isFront?'front':'locked');
+      d.innerHTML = q.status==='claimed'
+        ? `<span>✅ ${q.code}</span><span class="who">${q.claimedBy||''}</span>`
+        : isFront ? `<span>🔓 ${q.code} — kerjakan!</span><span>➜</span>`
+        : `<span>🔒 ${q.code}</span><span class="who">terkunci</span>`;
+      if(q.status!=='claimed'&&isFront&&g.status==='running'){d.onclick=()=>openQ(q.id);}
+      else if(g.status!=='running'){d.onclick=()=>toast(g.status==='lobby'?'Tunggu guru menekan MULAI ⏳':'Permainan sudah berakhir 🏁',false);}
+      else if(!isFront&&q.status!=='claimed'){d.onclick=()=>toast('Soal '+q.code+' masih di belakang flip chart. Selesaikan soal depan dulu! 🔒',false);}
+      sl.appendChild(d);
+    });
+    div.appendChild(sl);box.appendChild(div);
+  }
+  // board
+  $('board').innerHTML=STATE.leaderboard.map((p,i)=>
+    `<div class="row r${i+1} ${p.name===ME.name?'':''}" style="${p.name===ME.name?'outline:2px solid var(--gold)':''}"><div class="rank">${i+1}</div><div class="nm">${p.name}${p.name===ME.name?' (kamu)':''}<br><span class="kbd">${p.claims.join(' • ')||'belum klaim'}</span></div><div class="sc">${p.score}</div></div>`).join('')||'<span class="kbd">Belum ada champion.</span>';
+}
+function openQ(id){
+  const q=STATE.questions.find(x=>x.id===id); if(!q)return;
+  CUR=q; $('mcode').textContent=q.code+' • FLIP '+q.chart;
+  $('mtext').textContent=q.text; $('mnote').textContent=q.note||'';
+  $('ilus').innerHTML=svgFor(q.kind,q.dims);
+  $('ans').value='';$('mmsg').textContent='';
+  $('modal').classList.add('open');setTimeout(()=>$('ans').focus(),100);
+}
+$('close').onclick=()=>$('modal').classList.remove('open');
+$('modal').addEventListener('click',e=>{if(e.target.id==='modal')$('modal').classList.remove('open');});
+// keypad Adapto X
+(function(){
+  const keys=['1','2','3','4','5','6','7','8','9',',','0','⌫'];
+  $('pad').innerHTML=keys.map(k=>`<button data-k="${k}">${k}</button>`).join('');
+  document.querySelectorAll('#pad button').forEach(b=>b.onclick=()=>{
+    const k=b.dataset.k;
+    if(k==='⌫')$('ans').value=$('ans').value.slice(0,-1);
+    else $('ans').value+=k;
+    $('ans').focus();
+  });
+})();
+$('clear').onclick=()=>{$('ans').value='';$('ans').focus();};
+$('ans').addEventListener('keydown',e=>{if(e.key==='Enter')$('send').click();});
+$('send').onclick=async()=>{
+  if(!CUR)return;
+  const btn=$('send');btn.disabled=true;
+  $('mmsg').textContent='⏳ Memeriksa ke server…';
+  try{
+    const r=await fetch('/api/game/'+GAME+'/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,questionId:CUR.id,answer:$('ans').value})});
+    const j=await r.json();
+    if(j.correct){toast(j.message,true);$('modal').classList.remove('open');}
+    else{toast(j.message||j.error||'Gagal',false);$('mmsg').textContent=j.message||j.error||'';}
+  }catch(e){toast('Jaringan bermasalah. Coba lagi.',false);}
+  btn.disabled=false;
+};
+let ws=null;
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(proto+'://'+location.host);
+  ws.onopen=()=>ws.send(JSON.stringify({type:'subscribe',gameId:GAME}));
+  ws.onmessage=(ev)=>{
+    try{
+      const m=JSON.parse(ev.data);
+      if(m.type==='state'){STATE=m.state;render();}
+      if(m.type==='game_start'){toast('🚀 Permainan DIMULAI! Berebut soal terdepan!',true);}
+      if(m.type==='game_end'){toast(m.reason==='time_up'?'⏰ Waktu habis! Permainan berakhir.':m.reason==='all_claimed'?'🎉 Semua 50 soal diklaim! Permainan berakhir.':'🏁 Permainan diakhiri guru.',m.reason==='all_claimed');refresh();}
+    }catch(e){}
+  };
+  ws.onclose=()=>setTimeout(connectWS,2000);
+}
+setInterval(async()=>{ // fallback polling timer tiap 5 dtk bila WS putus
+  if(!ws||ws.readyState!==1) refresh();
+},5000);
+boot();
+</script>
+</body>
+</html>
